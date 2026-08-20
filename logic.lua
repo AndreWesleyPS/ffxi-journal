@@ -58,8 +58,10 @@ end
 -- Journal state
 
 local journal_mode = 1
+
 local mission_area_index = 1
 local mission_index = 1
+
 local quest_category_index = 1
 local quest_index = 1
 
@@ -119,11 +121,17 @@ local config_save_delay = 0.75
 local mission_status_cache = {}
 local quest_status_cache = {}
 
+-- Mission cache
+
 local mission_cache = {}
 local mission_cache_area = nil
 
+-- Quest cache
+
 local quest_cache = {}
 local quest_cache_category = nil
+
+-- Wait for mission packet bursts to settle.
 
 local MISSION_DIRTY_QUIET_WINDOW = 0.5
 
@@ -161,6 +169,7 @@ local function serialize_step(value)
     end
 
     local result = T{}
+
     for key, child in pairs(value) do
         result[key] = serialize_step(child)
     end
@@ -174,6 +183,7 @@ local function serialize_steps(steps)
     end
 
     local result = T{}
+
     for index, step in ipairs(steps) do
         result[index] = serialize_step(step)
     end
@@ -328,21 +338,43 @@ local function sync_quest_status_cache()
         return false
     end
 
+    local categories = get_quest_categories()
+    if #categories == 0 then
+        return false
+    end
+
+    local category = categories[quest_category_index]
+    if category == nil then
+        return false
+    end
+
     local changed = false
 
-    for _, category in ipairs(get_quest_categories()) do
-        for _, quest in ipairs(get_quest_list_from_tracker(category)) do
-            local tracker_area = quest.tracker_area
-            local tracker_id = quest.tracker_id
+    for _, quest in ipairs(get_quest_list_from_tracker(category)) do
+        local tracker_area = quest.tracker_area
+        local tracker_id = quest.tracker_id
 
-            if quest.trackable ~= false and tracker_area ~= nil and tracker_id ~= nil then
-                local key = get_status_cache_key(tracker_area, tracker_id)
-                local status = quest.status or 'not_started'
+        if quest.trackable ~= false
+            and tracker_area ~= nil
+            and tracker_id ~= nil then
 
-                if quest_status_cache[key] ~= status then
-                    quest_status_cache[key] = status
+            local key = get_status_cache_key(tracker_area, tracker_id)
+            local status = quest.status or 'not_started'
+            local cached = quest_status_cache[key]
+
+            if status == 'completed' then
+                if cached ~= 'completed' then
+                    quest_status_cache[key] = 'completed'
                     changed = true
                 end
+            elseif status == 'active' then
+                if cached ~= 'active' then
+                    quest_status_cache[key] = 'active'
+                    changed = true
+                end
+            elseif cached == nil then
+                quest_status_cache[key] = 'not_started'
+                changed = true
             end
         end
     end
@@ -355,37 +387,14 @@ local function sync_quest_status_cache()
     return changed
 end
 
-local function update_tracker_sync()
-    if not tracker_is_ready() then
-        return false, false
-    end
-
-    local mission_changed = false
-    local quest_changed = false
-
-    if tracker.IsMissionDirty == nil or tracker.IsMissionDirty() then
-        mission_changed = sync_mission_status_cache()
-
-        if tracker.ClearMissionDirty ~= nil then
-            tracker.ClearMissionDirty()
-        end
-    end
-
-    if tracker.IsQuestDirty == nil or tracker.IsQuestDirty() then
-        quest_changed = sync_quest_status_cache()
-
-        if tracker.ClearQuestDirty ~= nil then
-            tracker.ClearQuestDirty()
-        end
-    end
-
-    return mission_changed, quest_changed
-end
-
 local function apply_cached_statuses(area, missions_list)
     for _, mission in ipairs(missions_list or {}) do
         local key = get_status_cache_key(area, mission.id)
-        mission.status = mission_status_cache[key] or mission.status or 'not_started'
+
+        mission.status =
+            mission_status_cache[key]
+            or mission.status
+            or 'not_started'
     end
 
     return missions_list or {}
@@ -393,9 +402,20 @@ end
 
 local function apply_cached_quest_statuses(category, quests_list)
     for _, quest in ipairs(quests_list or {}) do
-        if quest.trackable ~= false and quest.tracker_area ~= nil and quest.tracker_id ~= nil then
-            local key = get_status_cache_key(quest.tracker_area, quest.tracker_id)
-            quest.status = quest_status_cache[key] or quest.status or 'not_started'
+        if quest.trackable ~= false
+            and quest.tracker_area ~= nil
+            and quest.tracker_id ~= nil then
+
+            local key =
+                get_status_cache_key(
+                    quest.tracker_area,
+                    quest.tracker_id
+                )
+
+            quest.status =
+                quest_status_cache[key]
+                or quest.status
+                or 'not_started'
         end
     end
 
@@ -409,7 +429,9 @@ local function validate_state()
         journal_mode = 1
     end
 
-    if mission_area_index < 1 or mission_area_index > #mission_areas then
+    if mission_area_index < 1
+        or mission_area_index > #mission_areas then
+
         mission_area_index = 1
     end
 
@@ -420,7 +442,9 @@ local function validate_state()
     local categories = get_quest_categories()
 
     if #categories > 0 then
-        if quest_category_index < 1 or quest_category_index > #categories then
+        if quest_category_index < 1
+            or quest_category_index > #categories then
+
             quest_category_index = 1
         end
     else
@@ -442,10 +466,16 @@ local function rebuild_mission_cache()
         area = mission_areas[1]
     end
 
-    local mission_list = apply_cached_statuses(area, tracker.GetMissionArea(area))
+    local mission_list =
+        apply_cached_statuses(
+            area,
+            tracker.GetMissionArea(area)
+        )
+
     mission_cache = {}
 
-    local first_mission = nil
+    local first_mission
+
     for _, mission in ipairs(mission_list) do
         if mission.status ~= 'hidden' then
             first_mission = mission
@@ -475,7 +505,14 @@ local function rebuild_mission_cache()
     if #mission_cache == 0 then
         mission_index = 1
     else
-        mission_index = math.max(1, math.min(mission_index, #mission_cache))
+        mission_index =
+            math.max(
+                1,
+                math.min(
+                    mission_index,
+                    #mission_cache
+                )
+            )
     end
 end
 
@@ -501,17 +538,23 @@ local function rebuild_quest_cache()
         return
     end
 
-    local quests_list = apply_cached_quest_statuses(
-        category,
-        get_quest_list_from_tracker(category)
-    )
+    local quests_list =
+        apply_cached_quest_statuses(
+            category,
+            get_quest_list_from_tracker(category)
+        )
 
     quest_cache = {}
 
     for _, quest in ipairs(quests_list) do
         local status = quest.status or 'not_started'
 
-        if status == 'active' or (status == 'completed' and not hide_complete_quests) then
+        if status == 'active'
+            or (
+                status == 'completed'
+                and not hide_complete_quests
+            ) then
+
             quest_cache[#quest_cache + 1] = quest
         end
     end
@@ -521,7 +564,14 @@ local function rebuild_quest_cache()
     if #quest_cache == 0 then
         quest_index = 1
     else
-        quest_index = math.max(1, math.min(quest_index, #quest_cache))
+        quest_index =
+            math.max(
+                1,
+                math.min(
+                    quest_index,
+                    #quest_cache
+                )
+            )
     end
 end
 
@@ -544,6 +594,7 @@ end
 
 function M.SetHideCompleteMissions(value)
     value = value == true
+
     if hide_complete_missions == value then
         return
     end
@@ -560,6 +611,7 @@ end
 
 function M.SetHideCompleteQuests(value)
     value = value == true
+
     if hide_complete_quests == value then
         return
     end
@@ -590,7 +642,14 @@ function M.GetMissionSelection()
     if #visible == 0 then
         mission_index = 1
     else
-        mission_index = math.max(1, math.min(mission_index, #visible))
+        mission_index =
+            math.max(
+                1,
+                math.min(
+                    mission_index,
+                    #visible
+                )
+            )
     end
 
     return {
@@ -599,11 +658,17 @@ function M.GetMissionSelection()
     }
 end
 
-function M.SetMissionSelection(area_index, selected_mission_index)
+function M.SetMissionSelection(
+    area_index,
+    selected_mission_index
+)
     local new_area = tonumber(area_index)
     local new_index = tonumber(selected_mission_index)
 
-    if new_area ~= nil and new_area >= 1 and new_area <= #mission_areas then
+    if new_area ~= nil
+        and new_area >= 1
+        and new_area <= #mission_areas then
+
         mission_area_index = new_area
     end
 
@@ -635,6 +700,7 @@ function M.SelectPreviousMission()
     end
 
     mission_index = mission_index - 1
+
     if mission_index < 1 then
         mission_index = #visible
     end
@@ -650,6 +716,7 @@ function M.SelectNextMission()
     end
 
     mission_index = mission_index + 1
+
     if mission_index > #visible then
         mission_index = 1
     end
@@ -659,6 +726,7 @@ end
 
 function M.SelectPreviousMissionArea()
     mission_area_index = mission_area_index - 1
+
     if mission_area_index < 1 then
         mission_area_index = #mission_areas
     end
@@ -671,6 +739,7 @@ end
 
 function M.SelectNextMissionArea()
     mission_area_index = mission_area_index + 1
+
     if mission_area_index > #mission_areas then
         mission_area_index = 1
     end
@@ -710,11 +779,22 @@ function M.GetSelectedQuest()
         return nil
     end
 
-    quest_index = math.max(1, math.min(quest_index, #quests))
+    quest_index =
+        math.max(
+            1,
+            math.min(
+                quest_index,
+                #quests
+            )
+        )
+
     return quests[quest_index]
 end
 
-function M.SetQuestSelection(category_index, selected_quest_index)
+function M.SetQuestSelection(
+    category_index,
+    selected_quest_index
+)
     local categories = get_quest_categories()
 
     if #categories == 0 then
@@ -727,7 +807,10 @@ function M.SetQuestSelection(category_index, selected_quest_index)
     local new_category = tonumber(category_index)
     local new_index = tonumber(selected_quest_index)
 
-    if new_category ~= nil and new_category >= 1 and new_category <= #categories then
+    if new_category ~= nil
+        and new_category >= 1
+        and new_category <= #categories then
+
         quest_category_index = new_category
     end
 
@@ -738,10 +821,18 @@ function M.SetQuestSelection(category_index, selected_quest_index)
     invalidate_quest_cache()
 
     local quests = M.GetQuestList()
+
     if #quests == 0 then
         quest_index = 1
     else
-        quest_index = math.max(1, math.min(quest_index, #quests))
+        quest_index =
+            math.max(
+                1,
+                math.min(
+                    quest_index,
+                    #quests
+                )
+            )
     end
 
     request_config_save()
@@ -755,6 +846,7 @@ function M.SelectPreviousQuestCategory()
     end
 
     quest_category_index = quest_category_index - 1
+
     if quest_category_index < 1 then
         quest_category_index = #categories
     end
@@ -773,6 +865,7 @@ function M.SelectNextQuestCategory()
     end
 
     quest_category_index = quest_category_index + 1
+
     if quest_category_index > #categories then
         quest_category_index = 1
     end
@@ -791,6 +884,7 @@ function M.SelectPreviousQuest()
     end
 
     quest_index = quest_index - 1
+
     if quest_index < 1 then
         quest_index = #quests
     end
@@ -806,6 +900,7 @@ function M.SelectNextQuest()
     end
 
     quest_index = quest_index + 1
+
     if quest_index > #quests then
         quest_index = 1
     end
@@ -859,6 +954,7 @@ function M.SetMission(id, name, steps)
     mission_log_name = tostring(name or '')
     mission_log_steps = steps or {}
     mission_log_visible = true
+
     request_config_save()
 end
 
@@ -894,11 +990,17 @@ function M.HideMissionLog()
     request_config_save()
 end
 
-function M.SetMissionLogGeometry(x, y, width, height)
+function M.SetMissionLogGeometry(
+    x,
+    y,
+    width,
+    height
+)
     mission_log_x = x
     mission_log_y = y
     mission_log_width = width
     mission_log_height = height
+
     request_config_save()
 end
 
@@ -927,10 +1029,16 @@ function M.SetQuest(id, name, steps)
     quest_log_name = tostring(name or '')
     quest_log_steps = steps or {}
     quest_log_visible = true
+
     request_config_save()
 end
 
-function M.SetQuestData(id, name, steps, visible)
+function M.SetQuestData(
+    id,
+    name,
+    steps,
+    visible
+)
     quest_log_id = tostring(id or '')
     quest_log_name = tostring(name or '')
     quest_log_steps = steps or {}
@@ -962,11 +1070,17 @@ function M.HideQuestLog()
     request_config_save()
 end
 
-function M.SetQuestLogGeometry(x, y, width, height)
+function M.SetQuestLogGeometry(
+    x,
+    y,
+    width,
+    height
+)
     quest_log_x = x
     quest_log_y = y
     quest_log_width = width
     quest_log_height = height
+
     request_config_save()
 end
 
@@ -1004,11 +1118,17 @@ function M.ToggleJournal()
     request_config_save()
 end
 
-function M.SetJournalGeometry(x, y, width, height)
+function M.SetJournalGeometry(
+    x,
+    y,
+    width,
+    height
+)
     journal_x = x
     journal_y = y
     journal_width = width
     journal_height = height
+
     request_config_save()
 end
 
@@ -1081,7 +1201,11 @@ local function set_log_mission(mission)
         return
     end
 
-    M.SetMission(mission.id, mission.name, mission.steps or {})
+    M.SetMission(
+        mission.id,
+        mission.name,
+        mission.steps or {}
+    )
 end
 
 local function find_log_mission(log_id, log_name)
@@ -1089,10 +1213,14 @@ local function find_log_mission(log_id, log_name)
 
     for _, area in ipairs(mission_areas) do
         for index, mission in ipairs(tracker.GetMissionArea(area) or {}) do
-            local id_matches = numeric_id ~= nil and tonumber(mission.id) == numeric_id
+            local id_matches =
+                numeric_id ~= nil
+                and tonumber(mission.id) == numeric_id
                 or tostring(mission.id) == tostring(log_id)
 
-            local name_matches = tostring(mission.name or '') == tostring(log_name or '')
+            local name_matches =
+                tostring(mission.name or '')
+                == tostring(log_name or '')
 
             if id_matches and name_matches then
                 return area, mission, index
@@ -1105,11 +1233,13 @@ end
 
 local function find_next_mission(area, current_index)
     local mission_list = tracker.GetMissionArea(area)
+
     if mission_list == nil then
         return nil
     end
 
     local start_index = tonumber(current_index)
+
     if start_index == nil then
         return nil
     end
@@ -1131,13 +1261,22 @@ end
 local function check_current_mission()
     local current_log = M.GetMission()
 
-    if current_log.id == '' or current_log.name == '' then
+    if current_log.id == ''
+        or current_log.name == '' then
+
         return
     end
 
-    local area, mission, index = find_log_mission(current_log.id, current_log.name)
+    local area, mission, index =
+        find_log_mission(
+            current_log.id,
+            current_log.name
+        )
 
-    if area == nil or mission == nil or index == nil then
+    if area == nil
+        or mission == nil
+        or index == nil then
+
         return
     end
 
@@ -1154,7 +1293,12 @@ local function check_current_mission()
         return
     end
 
-    local next_mission = find_next_mission(area, index)
+    local next_mission =
+        find_next_mission(
+            area,
+            index
+        )
+
     if next_mission ~= nil then
         set_log_mission(next_mission)
     end
@@ -1170,8 +1314,13 @@ local function find_log_quest(log_id, log_name)
                 get_quest_list_from_tracker(category)
             )
         ) do
-            local id_matches = tostring(quest.id or '') == tostring(log_id or '')
-            local name_matches = tostring(quest.name or '') == tostring(log_name or '')
+            local id_matches =
+                tostring(quest.id or '')
+                == tostring(log_id or '')
+
+            local name_matches =
+                tostring(quest.name or '')
+                == tostring(log_name or '')
 
             if id_matches and name_matches then
                 return category, quest
@@ -1185,41 +1334,62 @@ end
 local function check_current_quest()
     local current_log = M.GetQuest()
 
-    if current_log.id == '' or current_log.name == '' then
+    if current_log.id == ''
+        or current_log.name == '' then
+
         return
     end
 
-    local category, quest = find_log_quest(current_log.id, current_log.name)
+    local category, quest =
+        find_log_quest(
+            current_log.id,
+            current_log.name
+        )
 
-    if category == nil or quest == nil then
+    if category == nil
+        or quest == nil then
+
         return
     end
 
     if quest.status == 'completed' then
-        M.SetQuestData('', '', {}, false)
+        M.SetQuestData(
+            '',
+            '',
+            {},
+            false
+        )
     end
 end
 
 -- Settings character switch
 
-settings.register('settings', 'journal_settings_update', function(s)
-    if s == nil then
-        return
-    end
+settings.register(
+    'settings',
+    'journal_settings_update',
+    function(s)
+        if s == nil then
+            return
+        end
 
-    config = s
-    apply_config()
-    validate_state()
-    invalidate_mission_cache()
-    invalidate_quest_cache()
-end)
+        config = s
+
+        apply_config()
+        validate_state()
+
+        invalidate_mission_cache()
+        invalidate_quest_cache()
+    end
+)
 
 -- Commands
 
 function M.HandleCommand(e)
     local args = e.command:args()
 
-    if #args == 0 or args[1]:lower() ~= '/journal' then
+    if #args == 0
+        or args[1]:lower() ~= '/journal' then
+
         return
     end
 
@@ -1242,6 +1412,7 @@ function M.HandleCommand(e)
         print('/journal log - Toggle Mission Log')
         print('/journal quest - Open Quest Journal')
         print('/journal quest log - Toggle Quest Log')
+
         return
     end
 
@@ -1251,7 +1422,9 @@ function M.HandleCommand(e)
     end
 
     if command == 'quest' then
-        if args[3] ~= nil and args[3]:lower() == 'log' then
+        if args[3] ~= nil
+            and args[3]:lower() == 'log' then
+
             M.ToggleQuestLog()
         else
             M.SetJournalMode(2)
@@ -1271,6 +1444,7 @@ end
 function M.Load()
     apply_config()
     validate_state()
+
     invalidate_mission_cache()
     invalidate_quest_cache()
 
@@ -1296,20 +1470,26 @@ function M.Update()
         return
     end
 
-    local mission_dirty = tracker.IsMissionDirty ~= nil and tracker.IsMissionDirty()
-    local quest_dirty = tracker.IsQuestDirty ~= nil and tracker.IsQuestDirty()
+    local mission_dirty =
+        tracker.IsMissionDirty ~= nil
+        and tracker.IsMissionDirty()
 
-    -- Wait for the mission packet burst to settle before syncing.
+    local quest_dirty =
+        tracker.IsQuestDirty ~= nil
+        and tracker.IsQuestDirty()
 
     if mission_dirty then
-        local mission_last_touch = tracker.GetMissionLastTouch ~= nil
+        local mission_last_touch =
+            tracker.GetMissionLastTouch ~= nil
             and tracker.GetMissionLastTouch()
             or 0
 
-        local mission_quiet_for = os.clock() - mission_last_touch
+        local mission_quiet_for =
+            os.clock() - mission_last_touch
 
         if mission_quiet_for >= MISSION_DIRTY_QUIET_WINDOW then
-            local mission_changed = sync_mission_status_cache()
+            local mission_changed =
+                sync_mission_status_cache()
 
             if mission_changed then
                 rebuild_mission_cache()
@@ -1324,7 +1504,13 @@ function M.Update()
     end
 
     if quest_dirty then
-        sync_quest_status_cache()
+        local quest_changed =
+            sync_quest_status_cache()
+
+        if quest_changed then
+            invalidate_quest_cache()
+        end
+
         check_current_quest()
 
         if tracker.ClearQuestDirty ~= nil then
@@ -1337,7 +1523,9 @@ end
 
 function M.Unload()
     if tracker_is_ready() then
-        if tracker.IsMissionDirty == nil or tracker.IsMissionDirty() then
+        if tracker.IsMissionDirty == nil
+            or tracker.IsMissionDirty() then
+
             sync_mission_status_cache()
 
             if tracker.ClearMissionDirty ~= nil then
@@ -1345,7 +1533,9 @@ function M.Unload()
             end
         end
 
-        if tracker.IsQuestDirty == nil or tracker.IsQuestDirty() then
+        if tracker.IsQuestDirty == nil
+            or tracker.IsQuestDirty() then
+
             sync_quest_status_cache()
 
             if tracker.ClearQuestDirty ~= nil then
