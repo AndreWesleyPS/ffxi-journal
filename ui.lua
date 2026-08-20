@@ -656,6 +656,7 @@ local function draw_selector_item(text, selected)
     imgui.PushStyleColor(ImGuiCol_Text, transparent)
 
     local clicked = imgui.Selectable(text, selected)
+    local hovered = imgui.IsItemHovered()
 
     imgui.PopStyleColor()
 
@@ -663,6 +664,20 @@ local function draw_selector_item(text, selected)
     local min_x, min_y = imgui.GetItemRectMin()
     local max_x, max_y = imgui.GetItemRectMax()
     local height = max_y - min_y
+
+    if hovered and not selected then
+        draw:AddRectFilled(
+            { min_x + 2, min_y + 1 },
+            { max_x - 2, max_y - 1 },
+            imgui.GetColorU32({
+                colors.button_hover[1],
+                colors.button_hover[2],
+                colors.button_hover[3],
+                0.55,
+            }),
+            2
+        )
+    end
 
     if selected then
         draw_selection_arrow(draw, min_x, min_y, height)
@@ -1012,42 +1027,6 @@ local function toggle_selected_log(kind, selected)
         end
         return
     end
-
-    if kind == 'Mission' then
-        M.SetMission(
-            selected.id,
-            selected.name,
-            selected.steps or {}
-        )
-    else
-        M.SetQuest(
-            selected.id,
-            selected.name,
-            selected.steps or {}
-        )
-    end
-end
-
-local function is_log_showing(kind, selected)
-    if not selected or not controller then
-        return false
-    end
-
-    local state
-    local log
-
-    if kind == 'Mission' then
-        state = controller.GetMissionLogState()
-        log = M.GetMission()
-    else
-        state = controller.GetQuestLogState()
-        log = M.GetQuest()
-    end
-
-    return state
-        and state.visible
-        and tostring(log.id or '') == tostring(selected.id or '')
-        and tostring(log.name or '') == tostring(selected.name or '')
 end
 
 local function draw_status_at_item_end(status)
@@ -1204,27 +1183,15 @@ local function draw_metadata(selected)
     end
 end
 
-local function draw_details_button(kind, selected, width)
-    local showing = is_log_showing(kind, selected)
-    local label
-
-    if kind == 'Mission' then
-        label = showing and 'Hide Mission Log' or 'Show in Mission Log'
-    else
-        label = showing and 'Hide Quest Log' or 'Show in Quest Log'
-    end
-
+local function draw_details_button(label, width, callback)
     local button_width = math.max(120, width - 24)
 
     imgui.SetCursorPosX(
         (imgui.GetWindowWidth() - button_width) * 0.5
     )
 
-    if imgui.Button(
-        label,
-        { button_width, ui_button_height }
-    ) then
-        toggle_selected_log(kind, selected)
+    if imgui.Button(label, { button_width, ui_button_height }) then
+        callback()
     end
 end
 
@@ -1257,10 +1224,7 @@ local function draw_details_panel(kind, width, area)
                     local cover_width = width - 24
                     local ratio = 1.0
 
-                    if cover.width
-                        and cover.height
-                        and cover.height > 0 then
-
+                    if cover.width and cover.height and cover.height > 0 then
                         ratio = cover.width / cover.height
                     end
 
@@ -1303,9 +1267,17 @@ local function draw_details_panel(kind, width, area)
             imgui.Spacing()
 
             draw_details_button(
-                kind,
-                selected,
-                width
+                kind == 'Mission'
+                    and 'Show in Mission Log'
+                    or 'Show in Quest Log',
+                width,
+                function()
+                    if kind == 'Mission' then
+                        M.SetMission(selected.id, selected.name, steps)
+                    else
+                        M.SetQuest(selected.id, selected.name, steps)
+                    end
+                end
             )
         else
             imgui.TextColored(
@@ -1406,7 +1378,6 @@ local function draw_journal_selector(is_mission_mode)
         imgui.SetCursorPosY(3)
 
         local button_width = imgui.GetContentRegionAvail()
-
         if imgui.Button(value, { button_width, ui_button_height }) then
             if is_mission_mode then
                 journal_area_popup_open = true
@@ -1576,10 +1547,8 @@ local function draw_journal_list(is_mission_mode, width)
         setter = controller.SetHideCompleteMissions
 
         callback = function(index)
-            controller.SetMissionSelection(
-                selection.area_index,
-                index
-            )
+            controller.SetMissionSelection(selection.area_index, index)
+            toggle_selected_log('Mission', items[index])
         end
 
         id = '##JournalMissionList'
@@ -1592,10 +1561,8 @@ local function draw_journal_list(is_mission_mode, width)
         setter = controller.SetHideCompleteQuests
 
         callback = function(index)
-            controller.SetQuestSelection(
-                selection.category_index,
-                index
-            )
+            controller.SetQuestSelection(selection.category_index, index)
+            toggle_selected_log('Quest', items[index])
         end
 
         id = '##JournalQuestList'
@@ -1606,9 +1573,7 @@ local function draw_journal_list(is_mission_mode, width)
         id,
         width,
         items,
-        is_mission_mode
-            and selection.mission_index
-            or selection.quest_index,
+        is_mission_mode and selection.mission_index or selection.quest_index,
         hide_label,
         getter,
         setter,
@@ -1621,21 +1586,16 @@ local function draw_journal_list(is_mission_mode, width)
 end
 
 local function draw_journal_mini()
-    if not can_draw_ui()
-        or not controller
-        or not controller.GetJournalMiniState then
-
+    if not can_draw_ui() or not controller or not controller.GetJournalMiniState then
         return
     end
 
     local state = controller.GetJournalMiniState()
-
     if not state or not state.visible then
         return
     end
 
     local journal_state = controller.GetJournalWindowState()
-
     if journal_state and journal_state.visible then
         return
     end
@@ -1673,7 +1633,6 @@ local function draw_journal_mini()
         imgui.SetCursorPos({ 6, 6 })
 
         local opened
-
         if texture_id ~= nil then
             opened = imgui.ImageButton(
                 texture_id,
@@ -1695,7 +1654,6 @@ local function draw_journal_mini()
         end
 
         local x, y = imgui.GetWindowPos()
-
         if x ~= state.x or y ~= state.y then
             controller.SetJournalMiniGeometry(x, y)
         end
@@ -1706,44 +1664,29 @@ local function draw_journal_mini()
 end
 
 local function draw_journal()
-    if not can_draw_ui()
-        or not controller
-        or not controller.GetJournalWindowState then
-
+    if not can_draw_ui() or not controller or not controller.GetJournalWindowState then
         return
     end
 
     local state = controller.GetJournalWindowState()
-
     if not state or not state.visible then
         return
     end
 
     if journal_restore_window then
-        journal_restore_window =
-            restore_window(
-                state,
-                journal_restore_window
-            )
+        journal_restore_window = restore_window(state, journal_restore_window)
     end
 
     push_theme()
 
     local font_pushed = mission_font ~= nil
-
     if font_pushed then
         imgui.PushFont(mission_font)
     end
 
-    local is_mission_mode =
-        controller.GetJournalMode() == 1
-
+    local is_mission_mode = controller.GetJournalMode() == 1
     local open = { state.visible }
-
-    local title =
-        is_mission_mode
-        and 'Mission Journal'
-        or 'Quest Journal'
+    local title = is_mission_mode and 'Mission Journal' or 'Quest Journal'
 
     if imgui.Begin(
         title .. '###JournalWindow',
@@ -1757,14 +1700,7 @@ local function draw_journal()
         local x, y = imgui.GetWindowPos()
         local width, height = imgui.GetWindowSize()
 
-        draw_panel(
-            draw,
-            x,
-            y,
-            width,
-            height,
-            true
-        )
+        draw_panel(draw, x, y, width, height, true)
 
         draw_journal_mode_selector(is_mission_mode)
         imgui.Spacing()
@@ -1778,16 +1714,9 @@ local function draw_journal()
         local content_width = imgui.GetWindowWidth()
         local spacing = 10
         local details_width = math.floor(content_width * 0.32)
-        local list_width =
-            content_width
-            - details_width
-            - spacing
+        local list_width = content_width - details_width - spacing
 
-        draw_journal_list(
-            is_mission_mode,
-            list_width
-        )
-
+        draw_journal_list(is_mission_mode, list_width)
         imgui.SameLine(0, spacing)
 
         if is_mission_mode then
@@ -1800,10 +1729,7 @@ local function draw_journal()
                 areas[selection.area_index]
             )
         else
-            draw_details_panel(
-                'Quest',
-                details_width
-            )
+            draw_details_panel('Quest', details_width)
         end
 
         local wx, wy = imgui.GetWindowPos()
@@ -1815,12 +1741,7 @@ local function draw_journal()
             or wh ~= state.height then
 
             if controller.SetJournalGeometry then
-                controller.SetJournalGeometry(
-                    wx,
-                    wy,
-                    ww,
-                    wh
-                )
+                controller.SetJournalGeometry(wx, wy, ww, wh)
             end
         end
     end
@@ -1850,9 +1771,7 @@ local function controller_vertical(direction)
 
     if journal_mode_popup_open then
         controller.SetJournalMode(
-            controller.GetJournalMode() == 1
-                and 2
-                or 1
+            controller.GetJournalMode() == 1 and 2 or 1
         )
         return
     end
@@ -1863,7 +1782,6 @@ local function controller_vertical(direction)
         else
             controller.SelectNextMissionArea()
         end
-
         return
     end
 
@@ -1873,12 +1791,10 @@ local function controller_vertical(direction)
         else
             controller.SelectNextQuestCategory()
         end
-
         return
     end
 
     local state = controller.GetJournalWindowState()
-
     if not state or not state.visible then
         return
     end
@@ -1904,7 +1820,6 @@ local function controller_horizontal(direction)
     end
 
     local state = controller.GetJournalWindowState()
-
     if not state or not state.visible then
         return
     end
@@ -1912,7 +1827,6 @@ local function controller_horizontal(direction)
     if journal_mode_popup_open
         or journal_area_popup_open
         or journal_category_popup_open then
-
         return
     end
 
@@ -1949,7 +1863,6 @@ local function controller_confirm()
     end
 
     local state = controller.GetJournalWindowState()
-
     if not state or not state.visible then
         return
     end
@@ -1967,18 +1880,20 @@ local function controller_confirm()
         local selected = controller.GetSelectedMission()
 
         if selected then
-            toggle_selected_log(
-                'Mission',
-                selected
+            M.SetMission(
+                selected.id,
+                selected.name,
+                selected.steps or {}
             )
         end
     else
         local selected = controller.GetSelectedQuest()
 
         if selected then
-            toggle_selected_log(
-                'Quest',
-                selected
+            M.SetQuest(
+                selected.id,
+                selected.name,
+                selected.steps or {}
             )
         end
     end
@@ -2017,7 +1932,6 @@ local function update_controller_repeat()
     end
 
     local state = controller.GetJournalWindowState()
-
     if not state or not state.visible then
         controller_repeat_button = nil
         controller_repeat_time = 0
@@ -2025,7 +1939,6 @@ local function update_controller_repeat()
     end
 
     local now = os.clock()
-
     if now < controller_repeat_time then
         return
     end
@@ -2046,7 +1959,6 @@ local function update_keyboard_repeat()
     end
 
     local state = controller.GetJournalWindowState()
-
     if not state or not state.visible then
         keyboard_repeat_key = nil
         keyboard_repeat_time = 0
@@ -2054,7 +1966,6 @@ local function update_keyboard_repeat()
     end
 
     local now = os.clock()
-
     if now < keyboard_repeat_time then
         return
     end
@@ -2079,8 +1990,7 @@ local function controller_enabled()
 
     local state = controller.GetJournalWindowState()
 
-    return (state ~= nil and state.visible)
-        or journal_help_window
+    return (state ~= nil and state.visible) or journal_help_window
 end
 
 local function sync_journal_mini()
@@ -2088,7 +1998,6 @@ local function sync_journal_mini()
         or not controller.GetJournalWindowState
         or not controller.GetJournalMiniState
         or not controller.SetJournalMini then
-
         return
     end
 
@@ -2110,130 +2019,112 @@ local function sync_journal_mini()
     end
 end
 
-ashita.events.register(
-    'xinput_button',
-    'journal_ui_xinput_button',
-    function(e)
-        if not controller_enabled() then
-            return
-        end
-
-        if e.state == 0 then
-            if controller_repeat_button == e.button then
-                controller_repeat_button = nil
-                controller_repeat_time = 0
-            end
-
-            return
-        end
-
-        if e.button == DPAD.UP
-            or e.button == DPAD.DOWN
-            or e.button == DPAD.LEFT
-            or e.button == DPAD.RIGHT then
-
-            controller_move(e.button)
-
-            controller_repeat_button = e.button
-            controller_repeat_time =
-                os.clock()
-                + controller_repeat_delay
-
-            e.blocked = true
-            return
-        end
-
-        if e.button == BUTTON_A then
-            controller_confirm()
-            e.blocked = true
-            return
-        end
-
-        if e.button == BUTTON_B then
-            controller_cancel()
-            e.blocked = true
-        end
+ashita.events.register('xinput_button', 'journal_ui_xinput_button', function(e)
+    if not controller_enabled() then
+        return
     end
-)
 
-ashita.events.register(
-    'key_data',
-    'journal_ui_key_data',
-    function(e)
-        if not controller then
-            return
+    if e.state == 0 then
+        if controller_repeat_button == e.button then
+            controller_repeat_button = nil
+            controller_repeat_time = 0
         end
+        return
+    end
 
-        local state = controller.GetJournalWindowState()
+    if e.button == DPAD.UP
+        or e.button == DPAD.DOWN
+        or e.button == DPAD.LEFT
+        or e.button == DPAD.RIGHT then
 
-        if (not state or not state.visible)
-            and not journal_help_window then
+        controller_move(e.button)
+        controller_repeat_button = e.button
+        controller_repeat_time = os.clock() + controller_repeat_delay
 
-            return
-        end
+        e.blocked = true
+        return
+    end
 
-        if not e.down then
-            if (
-                e.key == KEY.UP
-                or e.key == KEY.DOWN
-                or e.key == KEY.LEFT
-                or e.key == KEY.RIGHT
-            )
-                and keyboard_repeat_key == e.key then
+    if e.button == BUTTON_A then
+        controller_confirm()
+        e.blocked = true
+        return
+    end
 
-                keyboard_repeat_key = nil
-                keyboard_repeat_time = 0
-            end
+    if e.button == BUTTON_B then
+        controller_cancel()
+        e.blocked = true
+    end
+end)
 
-            return
-        end
+ashita.events.register('key_data', 'journal_ui_key_data', function(e)
+    if not controller then
+        return
+    end
 
-        if e.key == 0x01 then
-            controller.SetJournalVisible(false)
-            journal_help_window = false
-            close_popups()
-            reset_repeat()
+    local state = controller.GetJournalWindowState()
 
-            e.blocked = true
-            return
-        end
+    if (not state or not state.visible) and not journal_help_window then
+        return
+    end
 
-        if not state or not state.visible then
-            return
-        end
-
-        if e.key == KEY.UP
+    if not e.down then
+        if (
+            e.key == KEY.UP
             or e.key == KEY.DOWN
             or e.key == KEY.LEFT
-            or e.key == KEY.RIGHT then
+            or e.key == KEY.RIGHT
+        ) and keyboard_repeat_key == e.key then
+            keyboard_repeat_key = nil
+            keyboard_repeat_time = 0
+        end
 
-            if keyboard_repeat_key ~= e.key then
-                if e.key == KEY.UP then
-                    controller_vertical(-1)
-                elseif e.key == KEY_DOWN then
-                    controller_vertical(1)
-                elseif e.key == KEY_LEFT then
-                    controller_horizontal(-1)
-                else
-                    controller_horizontal(1)
-                end
+        return
+    end
 
-                keyboard_repeat_key = e.key
-                keyboard_repeat_time =
-                    os.clock()
-                    + keyboard_repeat_delay
+    if e.key == 0x01 then
+        controller.SetJournalVisible(false)
+        journal_help_window = false
+        close_popups()
+        reset_repeat()
+
+        e.blocked = true
+        return
+    end
+
+    if not state or not state.visible then
+        return
+    end
+
+    if e.key == KEY.UP
+        or e.key == KEY.DOWN
+        or e.key == KEY.LEFT
+        or e.key == KEY.RIGHT then
+
+        if keyboard_repeat_key ~= e.key then
+            if e.key == KEY.UP then
+                controller_vertical(-1)
+            elseif e.key == KEY.DOWN then
+                controller_vertical(1)
+            elseif e.key == KEY.LEFT then
+                controller_horizontal(-1)
+            else
+                controller_horizontal(1)
             end
 
-            e.blocked = true
-            return
+            keyboard_repeat_key = e.key
+            keyboard_repeat_time = os.clock() + keyboard_repeat_delay
         end
 
-        if e.key == 0x1C or e.key == 0x9C then
-            controller_confirm()
-            e.blocked = true
-        end
+        e.blocked = true
+        return
     end
-)
+
+    if e.key == 0x1C or e.key == 0x9C then
+        controller_confirm()
+        e.blocked = true
+    end
+end)
 
 local function draw_journal_help()
     if not journal_help_window or not game_ui_visible then
@@ -2252,7 +2143,6 @@ local function draw_journal_help()
     push_theme()
 
     local font_pushed = mission_font ~= nil
-
     if font_pushed then
         imgui.PushFont(mission_font)
     end
@@ -2264,20 +2154,9 @@ local function draw_journal_help()
         local x, y = imgui.GetWindowPos()
         local width, height = imgui.GetWindowSize()
 
-        draw_panel(
-            draw,
-            x,
-            y,
-            width,
-            height,
-            true
-        )
+        draw_panel(draw, x, y, width, height, true)
 
-        imgui.TextColored(
-            colors.gold,
-            'MISSION JOURNAL COMMANDS'
-        )
-
+        imgui.TextColored(colors.gold, 'MISSION JOURNAL COMMANDS')
         imgui.Spacing()
         imgui.Separator()
         imgui.Spacing()
@@ -2344,57 +2223,49 @@ function M.Draw()
     draw_journal_help()
 end
 
-ashita.events.register(
-    'load',
-    'journal_ui_load',
-    function()
-        initialize_game_visibility()
-        load_journal_mini_texture()
+ashita.events.register('load', 'journal_ui_load', function()
+    initialize_game_visibility()
+    load_journal_mini_texture()
 
-        mission_font = imgui.AddFontFromFileTTF(
-            addon.path .. 'assets/fonts/CarroisGothicSC-Regular.ttf',
-            30
-        )
-    end
-)
+    mission_font = imgui.AddFontFromFileTTF(
+        addon.path .. 'assets/fonts/CarroisGothicSC-Regular.ttf',
+        30
+    )
+end)
 
-ashita.events.register(
-    'unload',
-    'journal_ui_unload',
-    function()
-        reset_repeat()
-        list_last_selection = {}
+ashita.events.register('unload', 'journal_ui_unload', function()
+    reset_repeat()
+    list_last_selection = {}
 
-        log_collapsed = {
-            ['Mission Log'] = false,
-            ['Quest Log'] = false,
-        }
+    log_collapsed = {
+        ['Mission Log'] = false,
+        ['Quest Log'] = false,
+    }
 
-        log_expanded_height = {
-            ['Mission Log'] = nil,
-            ['Quest Log'] = nil,
-        }
+    log_expanded_height = {
+        ['Mission Log'] = nil,
+        ['Quest Log'] = nil,
+    }
 
-        for _, cover in pairs(journal_cover_cache) do
-            if cover ~= nil and cover ~= false then
-                cover.ptr = nil
-            end
+    for _, cover in pairs(journal_cover_cache) do
+        if cover ~= nil and cover ~= false then
+            cover.ptr = nil
         end
-
-        journal_mini_texture = nil
-        journal_cover_cache = {}
-        wrapped_cache = {}
-        wrapped_cache_count = 0
-        mission_font = nil
-
-        pGameMenu = 0
-        pEventSystem = 0
-        pInterfaceHidden = 0
-
-        game_visibility_initialized = false
-        game_ui_visible = false
-        visibility_cache_time = 0
     end
-)
+
+    journal_mini_texture = nil
+    journal_cover_cache = {}
+    wrapped_cache = {}
+    wrapped_cache_count = 0
+    mission_font = nil
+
+    pGameMenu = 0
+    pEventSystem = 0
+    pInterfaceHidden = 0
+
+    game_visibility_initialized = false
+    game_ui_visible = false
+    visibility_cache_time = 0
+end)
 
 return M
