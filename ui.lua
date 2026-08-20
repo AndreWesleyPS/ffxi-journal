@@ -982,6 +982,69 @@ local function get_status_display(status)
     return 'Not Started', colors.not_started
 end
 
+local function is_log_showing(kind, selected)
+    if not controller or not selected then
+        return false
+    end
+
+    local state
+    local log
+
+    if kind == 'Mission' then
+        state = controller.GetMissionLogState()
+        log = M.GetMission()
+    else
+        state = controller.GetQuestLogState()
+        log = M.GetQuest()
+    end
+
+    if not state or not state.visible then
+        return false
+    end
+
+    return tostring(log.id or '') == tostring(selected.id or '')
+        and tostring(log.name or '') == tostring(selected.name or '')
+end
+
+local function toggle_selected_log(kind)
+    if not controller then
+        return
+    end
+
+    local selected =
+        kind == 'Mission'
+        and controller.GetSelectedMission()
+        or controller.GetSelectedQuest()
+
+    if not selected then
+        return
+    end
+
+    if is_log_showing(kind, selected) then
+        if kind == 'Mission' then
+            controller.SetMissionLogVisible(false)
+        else
+            controller.SetQuestLogVisible(false)
+        end
+
+        return
+    end
+
+    if kind == 'Mission' then
+        M.SetMission(
+            selected.id,
+            selected.name,
+            selected.steps or {}
+        )
+    else
+        M.SetQuest(
+            selected.id,
+            selected.name,
+            selected.steps or {}
+        )
+    end
+end
+
 local function draw_status_at_item_end(status)
     local text, color = get_status_display(status)
     local _, min_y = imgui.GetItemRectMin()
@@ -1219,16 +1282,40 @@ local function draw_details_panel(kind, width, area)
 
             imgui.Spacing()
 
+            local showing_in_log = is_log_showing(kind, selected)
+
             draw_details_button(
-                kind == 'Mission'
-                    and 'Show in Mission Log'
-                    or 'Show in Quest Log',
+                showing_in_log
+                    and (
+                        kind == 'Mission'
+                        and 'Hide Mission Log'
+                        or 'Hide Quest Log'
+                    )
+                    or (
+                        kind == 'Mission'
+                        and 'Show in Mission Log'
+                        or 'Show in Quest Log'
+                    ),
                 width,
                 function()
-                    if kind == 'Mission' then
-                        M.SetMission(selected.id, selected.name, steps)
+                    if showing_in_log then
+                        if kind == 'Mission' then
+                            controller.SetMissionLogVisible(false)
+                        else
+                            controller.SetQuestLogVisible(false)
+                        end
+                    elseif kind == 'Mission' then
+                        M.SetMission(
+                            selected.id,
+                            selected.name,
+                            steps
+                        )
                     else
-                        M.SetQuest(selected.id, selected.name, steps)
+                        M.SetQuest(
+                            selected.id,
+                            selected.name,
+                            steps
+                        )
                     end
                 end
             )
@@ -1498,9 +1585,12 @@ local function draw_journal_list(is_mission_mode, width)
         hide_label = 'Hide complete missions'
         getter = controller.GetHideCompleteMissions
         setter = controller.SetHideCompleteMissions
+
         callback = function(index)
             controller.SetMissionSelection(selection.area_index, index)
+            toggle_selected_log('Mission')
         end
+
         id = '##JournalMissionList'
         spacing = false
     else
@@ -1509,9 +1599,12 @@ local function draw_journal_list(is_mission_mode, width)
         hide_label = 'Hide complete quests'
         getter = controller.GetHideCompleteQuests
         setter = controller.SetHideCompleteQuests
+
         callback = function(index)
             controller.SetQuestSelection(selection.category_index, index)
+            toggle_selected_log('Quest')
         end
+
         id = '##JournalQuestList'
         spacing = true
     end
@@ -1533,7 +1626,9 @@ local function draw_journal_list(is_mission_mode, width)
 end
 
 local function draw_journal_mini()
-    if not can_draw_ui() or not controller or not controller.GetJournalMiniState then
+    if not can_draw_ui()
+        or not controller
+        or not controller.GetJournalMiniState then
         return
     end
 
@@ -1611,7 +1706,9 @@ local function draw_journal_mini()
 end
 
 local function draw_journal()
-    if not can_draw_ui() or not controller or not controller.GetJournalWindowState then
+    if not can_draw_ui()
+        or not controller
+        or not controller.GetJournalWindowState then
         return
     end
 
@@ -1824,17 +1921,9 @@ local function controller_confirm()
     end
 
     if controller.GetJournalMode() == 1 then
-        local selected = controller.GetSelectedMission()
-
-        if selected then
-            M.SetMission(selected.id, selected.name, selected.steps or {})
-        end
+        toggle_selected_log('Mission')
     else
-        local selected = controller.GetSelectedQuest()
-
-        if selected then
-            M.SetQuest(selected.id, selected.name, selected.steps or {})
-        end
+        toggle_selected_log('Quest')
     end
 end
 
