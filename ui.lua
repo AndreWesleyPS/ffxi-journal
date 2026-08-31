@@ -10,6 +10,11 @@ local logic = require('logic')
 local d3d8dev = d3d.get_device()
 local controller = logic
 
+-- Ashita 4.3 (ImGui 1.9x) replaced the old boolean "has border" argument
+-- of imgui.BeginChild() with the ImGuiChildFlags_Borders flag. On Ashita
+-- 4.2 that global does not exist, so this falls back to the old boolean.
+local child_border = ImGuiChildFlags_Borders or true
+
 function M.SetController(value)
     controller = value or logic
 end
@@ -1843,7 +1848,7 @@ local function draw_selectable_status_list(
     if imgui.BeginChild(
         child_id,
         { width, -1 },
-        true
+        child_border
     ) then
         local draw =
             imgui.GetWindowDrawList()
@@ -1938,9 +1943,9 @@ local function draw_selectable_status_list(
             list_last_selection[child_id] =
                 selection_index
         end
-
-        imgui.EndChild()
     end
+
+    imgui.EndChild()
 
     imgui.PopStyleColor()
 end
@@ -1967,7 +1972,7 @@ local function draw_steps(
     if imgui.BeginChild(
         child_id,
         { -1, -76 },
-        true
+        child_border
     ) then
         local draw =
             imgui.GetWindowDrawList()
@@ -1996,9 +2001,9 @@ local function draw_steps(
 
             imgui.Spacing()
         end
-
-        imgui.EndChild()
     end
+
+    imgui.EndChild()
 
     imgui.PopStyleColor()
 end
@@ -2121,7 +2126,7 @@ local function draw_details_panel(
             width,
             -1,
         },
-        true
+        child_border
     ) then
         local draw =
             imgui.GetWindowDrawList()
@@ -2240,9 +2245,9 @@ local function draw_details_panel(
                     .. ' selected.'
             )
         end
-
-        imgui.EndChild()
     end
+
+    imgui.EndChild()
 
     imgui.PopStyleColor()
 end
@@ -2375,7 +2380,7 @@ local function draw_journal_selector(
             -1,
             ui_bar_height,
         },
-        true,
+        child_border,
         ImGuiWindowFlags_NoScrollbar
             + ImGuiWindowFlags_NoScrollWithMouse
     ) then
@@ -2499,9 +2504,9 @@ local function draw_journal_selector(
             journal_category_popup_open =
                 opened
         end
-
-        imgui.EndChild()
     end
+
+    imgui.EndChild()
 
     imgui.PopStyleColor()
 end
@@ -2520,7 +2525,7 @@ local function draw_journal_mode_selector(
             -1,
             ui_bar_height,
         },
-        true,
+        child_border,
         ImGuiWindowFlags_NoScrollbar
             + ImGuiWindowFlags_NoScrollWithMouse
     ) then
@@ -2616,9 +2621,9 @@ local function draw_journal_mode_selector(
             journal_mode_popup_open =
                 false
         end
-
-        imgui.EndChild()
     end
+
+    imgui.EndChild()
 
     imgui.PopStyleColor()
 end
@@ -2642,7 +2647,7 @@ local function draw_journal_header(
             -1,
             ui_header_height,
         },
-        true,
+        child_border,
         ImGuiWindowFlags_NoScrollbar
             + ImGuiWindowFlags_NoScrollWithMouse
     ) then
@@ -2688,9 +2693,9 @@ local function draw_journal_header(
                 and 'Select a mission to view its objectives.'
                 or 'Select a quest to view its objectives.'
         )
-
-        imgui.EndChild()
     end
+
+    imgui.EndChild()
 
     imgui.PopStyleColor()
 end
