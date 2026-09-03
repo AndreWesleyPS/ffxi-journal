@@ -7,13 +7,64 @@ local ffi = require('ffi')
 local d3d = require('d3d8')
 local logic = require('logic')
 
+-- Ashita 4.1/4.3 ImGui compatibility.
+--
+-- 4.2: third argument is the legacy boolean 'border'.
+-- 4.3: third argument is ImGuiChildFlags.
+--
+-- Deliberately keep child_border as a boolean. This means:
+--   4.2 -> true is passed unchanged.
+--   4.3 -> true is converted to ImGuiChildFlags_Borders.
+--
+-- This also avoids passing a raw numeric ImGuiChildFlags value through the
+-- older binding, which is the important part for cross-version compatibility.
+local imgui_BeginChild_original = imgui.BeginChild
+local imgui_ashita_43 = (ImGuiChildFlags_Borders ~= nil)
+
+imgui.BeginChild = function(
+    id,
+    size,
+    cflags,
+    wflags
+)
+    if imgui_ashita_43 then
+        if cflags == true then
+            cflags = ImGuiChildFlags_Borders
+        elseif cflags == false or cflags == nil then
+            cflags = ImGuiChildFlags_None
+        end
+    else
+        -- Ashita 4.1 expects the old boolean border argument.
+        -- If a numeric flag ever reaches this wrapper, normalize it.
+        if type(cflags) == 'number' then
+            cflags = cflags ~= 0
+        elseif cflags == nil then
+            cflags = false
+        end
+    end
+
+    if wflags == nil then
+        return imgui_BeginChild_original(
+            id,
+            size,
+            cflags
+        )
+    end
+
+    return imgui_BeginChild_original(
+        id,
+        size,
+        cflags,
+        wflags
+    )
+end
+
 local d3d8dev = d3d.get_device()
 local controller = logic
 
--- Ashita 4.3 (ImGui 1.9x) replaced the old boolean "has border" argument
--- of imgui.BeginChild() with the ImGuiChildFlags_Borders flag. On Ashita
--- 4.2 that global does not exist, so this falls back to the old boolean.
-local child_border = ImGuiChildFlags_Borders or true
+-- Keep this as the legacy boolean. The compatibility wrapper above converts
+-- it to ImGuiChildFlags_Borders only on Ashita 4.3.
+local child_border = true
 
 function M.SetController(value)
     controller = value or logic
