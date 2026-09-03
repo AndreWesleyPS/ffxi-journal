@@ -9,11 +9,11 @@ local logic = require('logic')
 
 -- Ashita 4.1/4.3 ImGui compatibility.
 --
--- 4.2: third argument is the legacy boolean 'border'.
+-- 4.1: third argument is the legacy boolean 'border'.
 -- 4.3: third argument is ImGuiChildFlags.
 --
 -- Deliberately keep child_border as a boolean. This means:
---   4.2 -> true is passed unchanged.
+--   4.1 -> true is passed unchanged.
 --   4.3 -> true is converted to ImGuiChildFlags_Borders.
 --
 -- This also avoids passing a raw numeric ImGuiChildFlags value through the
